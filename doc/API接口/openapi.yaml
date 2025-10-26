@@ -1,0 +1,1126 @@
+openapi: 3.0.3
+info:
+  title: 消息通知平台 API
+  description: |
+    消息通知平台提供统一的消息发送服务，支持多种渠道（邮件、短信、微信等）。
+    
+    ## 特性
+    - 📧 邮件发送（支持HTML、附件、模板）
+    - 📱 短信发送（第二期）
+    - 💬 微信消息（第二期）
+    - 📝 消息模板管理
+    - 🔐 JWT Token认证
+    - 📊 监控和健康检查
+    
+    ## 认证方式
+    1. 使用API Key和API Secret获取JWT Token
+    2. 后续请求携带Token：`Authorization: Bearer {token}`
+    
+    ## 限流策略
+    - 每个API Key默认限制：1000次/小时
+    - 超过限制返回429状态码
+    
+    ## 技术支持
+    - 邮箱：support@example.com
+    - 文档：https://docs.example.com
+    
+  version: 1.0.0
+  contact:
+    name: 技术支持团队
+    email: support@example.com
+    url: https://docs.example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: 本地开发环境
+  - url: https://api-dev.example.com
+    description: 开发环境
+  - url: https://api-staging.example.com
+    description: 测试环境
+  - url: https://api.example.com
+    description: 生产环境
+
+tags:
+  - name: 认证
+    description: API认证相关接口
+  - name: 邮件
+    description: 邮件发送相关接口
+  - name: 模板
+    description: 消息模板管理接口
+  - name: 消息
+    description: 消息查询相关接口
+  - name: 附件
+    description: 附件管理接口
+  - name: 健康检查
+    description: 系统健康检查接口
+
+paths:
+  /health:
+    get:
+      tags:
+        - 健康检查
+      summary: 简单健康检查
+      description: 检查服务是否正常运行
+      operationId: healthCheck
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+  
+  /health/ready:
+    get:
+      tags:
+        - 健康检查
+      summary: 就绪检查
+      description: 检查服务及其依赖是否就绪
+      operationId: healthReady
+      responses:
+        '200':
+          description: 服务就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+  
+  /health/live:
+    get:
+      tags:
+        - 健康检查
+      summary: 存活检查
+      description: 检查服务进程是否存活
+      operationId: healthLive
+      responses:
+        '200':
+          description: 服务存活
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: alive
+  
+  /metrics:
+    get:
+      tags:
+        - 健康检查
+      summary: Prometheus监控指标
+      description: 暴露Prometheus格式的监控指标
+      operationId: metricsExport
+      responses:
+        '200':
+          description: 监控指标
+          content:
+            text/plain:
+              schema:
+                type: string
+  
+  /api/v1/auth/token:
+    post:
+      tags:
+        - 认证
+      summary: 获取JWT Token
+      description: 使用API Key和API Secret获取JWT Token
+      operationId: getToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Token获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - 认证
+      summary: 刷新JWT Token
+      description: 使用当前Token获取新Token
+      operationId: refreshToken
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  
+  /api/v1/attachments/upload:
+    post:
+      tags:
+        - 附件
+      summary: 上传附件
+      description: 上传邮件附件，返回attachment_id
+      operationId: uploadAttachment
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 附件文件
+                uploaded_by:
+                  type: string
+                  description: 上传者
+      responses:
+        '200':
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          description: 文件过大
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/messages/email/send:
+    post:
+      tags:
+        - 邮件
+      summary: 发送邮件
+      description: |
+        发送邮件，支持两种模式：
+        1. **直接发送**：提供subject和content
+        2. **模板发送**：提供template_id和template_vars
+        
+        两种模式二选一，不能同时提供。
+      operationId: sendEmail
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailSendRequest'
+            examples:
+              direct:
+                summary: 直接发送
+                value:
+                  to: "user@example.com"
+                  subject: "测试邮件"
+                  content: "<h1>测试内容</h1>"
+                  content_type: "html"
+              template:
+                summary: 模板发送
+                value:
+                  to: "user@example.com"
+                  template_id: 1
+                  template_vars:
+                    username: "张三"
+                    code: "123456"
+                    expire_minutes: "5"
+      responses:
+        '200':
+          description: 邮件发送成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageSendResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: 无可用邮箱账户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  
+  /api/v1/messages/{message_id}:
+    get:
+      tags:
+        - 消息
+      summary: 查询消息状态
+      description: 根据message_id查询消息发送状态
+      operationId: getMessage
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: message_id
+          in: path
+          required: true
+          description: 消息ID
+          schema:
+            type: string
+            example: "msg_20251024_abc123"
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  
+  /api/v1/messages:
+    get:
+      tags:
+        - 消息
+      summary: 查询消息列表
+      description: 分页查询消息列表，支持多种筛选条件
+      operationId: listMessages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: recipient
+          in: query
+          description: 接收人
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: 消息状态
+          schema:
+            type: string
+            enum: [pending, sending, success, failed]
+        - name: start_date
+          in: query
+          description: 开始日期
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          description: 结束日期
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          description: 页码
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: page_size
+          in: query
+          description: 每页数量
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageListResponse'
+  
+  /api/v1/messages/batch/query:
+    post:
+      tags:
+        - 消息
+      summary: 批量查询消息
+      description: 根据message_id列表批量查询消息状态
+      operationId: batchGetMessages
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchQueryRequest'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchQueryResponse'
+  
+  /api/v1/templates:
+    get:
+      tags:
+        - 模板
+      summary: 查询模板列表
+      description: 分页查询模板列表
+      operationId: listTemplates
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_type
+          in: query
+          description: 模板类型
+          schema:
+            type: string
+            enum: [email, sms, wechat]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+    
+    post:
+      tags:
+        - 模板
+      summary: 创建模板
+      description: 创建新的消息模板
+      operationId: createTemplate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreateRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  
+  /api/v1/templates/{template_id}:
+    get:
+      tags:
+        - 模板
+      summary: 查询模板详情
+      description: 根据模板ID查询模板详细信息
+      operationId: getTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    put:
+      tags:
+        - 模板
+      summary: 更新模板
+      description: 更新模板内容，会自动创建新版本
+      operationId: updateTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateUpdateRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      tags:
+        - 模板
+      summary: 删除模板
+      description: 软删除模板（设置deleted_at）
+      operationId: deleteTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  
+  /api/v1/templates/{template_id}/history:
+    get:
+      tags:
+        - 模板
+      summary: 查询模板历史版本
+      description: 查询模板的所有历史版本
+      operationId: getTemplateHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateHistoryResponse'
+  
+  /api/v1/templates/{template_id}/rollback:
+    post:
+      tags:
+        - 模板
+      summary: 回滚模板
+      description: 回滚到指定历史版本
+      operationId: rollbackTemplate
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateRollbackRequest'
+      responses:
+        '200':
+          description: 回滚成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateResponse'
+  
+  /api/v1/templates/preview:
+    post:
+      tags:
+        - 模板
+      summary: 预览模板
+      description: 使用测试数据渲染模板，查看最终效果
+      operationId: previewTemplate
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplatePreviewRequest'
+      responses:
+        '200':
+          description: 预览成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplatePreviewResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT Token认证
+  
+  schemas:
+    # ============ 通用响应 ============
+    BaseResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 状态码，0表示成功
+          example: 0
+        message:
+          type: string
+          description: 响应消息
+          example: "success"
+        request_id:
+          type: string
+          description: 请求追踪ID
+          example: "req_xyz789"
+        timestamp:
+          type: string
+          format: date-time
+          description: 响应时间
+    
+    SuccessResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              nullable: true
+    
+    ErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              nullable: true
+    
+    # ============ 健康检查 ============
+    HealthCheckResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [healthy, unhealthy]
+                components:
+                  type: object
+                  properties:
+                    database:
+                      type: string
+                      enum: [ok, error]
+                    redis:
+                      type: string
+                      enum: [ok, error]
+                    rabbitmq:
+                      type: string
+                      enum: [ok, error]
+    
+    # ============ 认证 ============
+    TokenRequest:
+      type: object
+      required:
+        - api_key
+        - api_secret
+      properties:
+        api_key:
+          type: string
+          description: API密钥
+          example: "noti_abc123def456"
+        api_secret:
+          type: string
+          description: API密钥
+          format: password
+          example: "your_api_secret"
+    
+    TokenResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                access_token:
+                  type: string
+                  description: JWT Token
+                  example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                token_type:
+                  type: string
+                  description: Token类型
+                  example: "bearer"
+                expires_in:
+                  type: integer
+                  description: 过期时间（秒）
+                  example: 3600
+    
+    # ============ 附件 ============
+    AttachmentUploadResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  attachment_id:
+                    type: string
+                    example: "att_20251024_abc123"
+                  filename:
+                    type: string
+                    example: "report.pdf"
+                  file_size:
+                    type: integer
+                    description: 文件大小（字节）
+                    example: 1024000
+                  mime_type:
+                    type: string
+                    example: "application/pdf"
+                  expires_at:
+                    type: string
+                    format: date-time
+    
+    # ============ 邮件发送 ============
+    EmailSendRequest:
+      type: object
+      required:
+        - to
+      properties:
+        to:
+          type: string
+          format: email
+          description: 收件人邮箱
+          example: "user@example.com"
+        cc:
+          type: array
+          items:
+            type: string
+            format: email
+          description: 抄送列表
+        bcc:
+          type: array
+          items:
+            type: string
+            format: email
+          description: 密送列表
+        subject:
+          type: string
+          description: 邮件主题（直接发送时必填）
+          example: "测试邮件"
+        content:
+          type: string
+          description: 邮件内容（直接发送时必填）
+          example: "<h1>测试内容</h1>"
+        content_type:
+          type: string
+          enum: [html, text]
+          default: html
+          description: 内容类型
+        template_id:
+          type: integer
+          description: 模板ID（模板发送时必填）
+          example: 1
+        template_vars:
+          type: object
+          description: 模板变量（模板发送时必填）
+          additionalProperties: true
+          example:
+            username: "张三"
+            code: "123456"
+        attachment_ids:
+          type: array
+          items:
+            type: string
+          description: 附件ID列表
+          example: ["att_xxx", "att_yyy"]
+        idempotency_key:
+          type: string
+          description: 幂等键，防止重复发送
+          example: "unique-key-123"
+        async:
+          type: boolean
+          default: true
+          description: 是否异步发送
+    
+    MessageSendResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                message_id:
+                  type: string
+                  example: "msg_20251024_abc123"
+                status:
+                  type: string
+                  enum: [pending, sending, success, failed]
+                  example: "pending"
+    
+    # ============ 消息查询 ============
+    MessageDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                message_id:
+                  type: string
+                message_type:
+                  type: string
+                  enum: [email, sms, wechat]
+                recipient:
+                  type: string
+                subject:
+                  type: string
+                status:
+                  type: string
+                  enum: [pending, sending, success, failed]
+                retry_count:
+                  type: integer
+                error_message:
+                  type: string
+                  nullable: true
+                created_at:
+                  type: string
+                  format: date-time
+                sent_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+    
+    MessageListResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                total:
+                  type: integer
+                  example: 100
+                page:
+                  type: integer
+                  example: 1
+                page_size:
+                  type: integer
+                  example: 20
+                records:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      message_id:
+                        type: string
+                      recipient:
+                        type: string
+                      subject:
+                        type: string
+                      status:
+                        type: string
+                      created_at:
+                        type: string
+                        format: date-time
+    
+    BatchQueryRequest:
+      type: object
+      required:
+        - message_ids
+      properties:
+        message_ids:
+          type: array
+          items:
+            type: string
+          maxItems: 100
+          example: ["msg_20251024_abc123", "msg_20251024_abc124"]
+    
+    BatchQueryResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                  status:
+                    type: string
+                  recipient:
+                    type: string
+                  sent_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+    
+    # ============ 模板管理 ============
+    TemplateCreateRequest:
+      type: object
+      required:
+        - template_name
+        - template_type
+        - content
+      properties:
+        template_name:
+          type: string
+          maxLength: 100
+          example: "注册验证码"
+        template_type:
+          type: string
+          enum: [email, sms, wechat]
+          example: "email"
+        subject:
+          type: string
+          maxLength: 255
+          example: "您的验证码"
+        content:
+          type: string
+          example: "<p>您的验证码是：{{code}}</p>"
+        variables:
+          type: array
+          items:
+            type: string
+          example: ["code", "username"]
+        description:
+          type: string
+          example: "用户注册验证码模板"
+        created_by:
+          type: string
+          example: "admin"
+    
+    TemplateUpdateRequest:
+      type: object
+      properties:
+        subject:
+          type: string
+        content:
+          type: string
+        variables:
+          type: array
+          items:
+            type: string
+        change_description:
+          type: string
+          example: "修改邮件主题"
+        updated_by:
+          type: string
+    
+    TemplateResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                id:
+                  type: integer
+                template_name:
+                  type: string
+                template_type:
+                  type: string
+                subject:
+                  type: string
+                content:
+                  type: string
+                variables:
+                  type: array
+                  items:
+                    type: string
+                version:
+                  type: integer
+                is_active:
+                  type: boolean
+                description:
+                  type: string
+                created_at:
+                  type: string
+                  format: date-time
+    
+    TemplateDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/TemplateResponse'
+    
+    TemplateListResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                total:
+                  type: integer
+                page:
+                  type: integer
+                page_size:
+                  type: integer
+                records:
+                  type: array
+                  items:
+                    type: object
+    
+    TemplateHistoryResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  version:
+                    type: integer
+                  content:
+                    type: string
+                  created_by:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+    
+    TemplateRollbackRequest:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          description: 要回滚到的版本号
+          example: 1
+        change_description:
+          type: string
+          example: "回滚到初始版本"
+        updated_by:
+          type: string
+          example: "admin"
+    
+    TemplatePreviewRequest:
+      type: object
+      required:
+        - template_id
+        - template_vars
+      properties:
+        template_id:
+          type: integer
+          example: 1
+        template_vars:
+          type: object
+          additionalProperties: true
+          example:
+            username: "张三"
+            code: "123456"
+    
+    TemplatePreviewResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                subject:
+                  type: string
+                  example: "您的验证码"
+                content:
+                  type: string
+                  example: "<p>您的验证码是：123456</p>"
+  
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 1001
+            message: "请求参数错误"
+            data: null
+            request_id: "req_xyz789"
+    
+    Unauthorized:
+      description: 认证失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 1002
+            message: "认证失败"
+            data: null
+            request_id: "req_xyz789"
+    
+    Forbidden:
+      description: 权限不足
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 1003
+            message: "权限不足"
+            data: null
+            request_id: "req_xyz789"
+    
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: 1004
+            message: "资源不存在"
+            data: null
+            request_id: "req_xyz789"
+
+security:
+  - bearerAuth: []
+
